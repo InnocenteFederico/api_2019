@@ -48,14 +48,17 @@ typedef relationshipNode *relationshipPointer;
 /* *********************** Global variables *************** */
 
 entityNodePointer *entityTree;
+entityNode *entityRoot;
 int entityElements = 0;
 int currentMaxEntitySize = ELEMENTS_STOCK;
 
 relationshipPointer *relationshipTree;
+relationshipNode *relationshipRoot;
 int relationshipElements = 0;
 int currentMaxRelationshipSize = RELATIONSHIP_STOCK;
 
-entityNode NIL;
+entityNode NIL_ENT;
+relationshipNode NIL_REL;
 
 /* ******************* Functions prototypes **************** */
 void report();
@@ -76,6 +79,12 @@ void rotateEntityLeft(entityNode *subRoot);
 
 void rotateEntityRight(entityNode *subRoot);
 
+void transplantEntity(entityNode *firstSubRoot, entityNode *secondSubRoot);
+
+entityNode *entitySubMinimum (entityNode *subRoot);
+
+entityNode copyEntityNode(entityNode *copiedNode);
+
 /* ******************** MAIN ********************** */
 int main() {
     char inputBuffer[INPUT_BUFFER];
@@ -84,13 +93,18 @@ int main() {
     entityTree = malloc(ELEMENTS_STOCK * sizeof(entityNode));
     relationshipTree = malloc(RELATIONSHIP_STOCK * sizeof(relationshipNode));
 
-    NIL.father = &NIL;
-    NIL.leftSon = &NIL;
-    NIL.rightSon = &NIL;
-    NIL.nodeColour = black;
+    NIL_ENT.father = &NIL_ENT;
+    NIL_ENT.leftSon = &NIL_ENT;
+    NIL_ENT.rightSon = &NIL_ENT;
+    NIL_ENT.nodeColour = black;
 
-    *entityTree[0] = NIL;
-    *entityTree[0] = NIL;
+    //todo inizializzare NIL_REL e rel root
+
+    *entityTree[0] = NIL_ENT;
+    *relationshipTree[0] = NIL_REL;
+
+    entityRoot = entityTree[0];
+    relationshipRoot = relationshipTree[0];
 
     fgets(inputBuffer, INPUT_BUFFER, stdin);
     while (strcmp(inputBuffer, "end") != 0) {
@@ -130,21 +144,19 @@ entityNode *getEntityUncle(entityNode node) {
 }
 
 void addent(char newEntity[]) {
-    entityNode *newEntityFather = &NIL;
-    entityNode *newEntitySearch = entityTree[entityElements];
-    const entityNode *currentNode = entityTree[entityElements];
+    entityNode *newEntityFather = &NIL_ENT;
+    entityNode *newEntitySearch = entityRoot;
+    const entityNode *addedNode = entityTree[entityElements];
 
     //calcolo il padre del nuovo elemento. Se l'elemento è gia presente, esco dalla funzione
-    while (newEntitySearch != &NIL) {
+    while (newEntitySearch != &NIL_ENT) {
+        newEntityFather = newEntitySearch;
         if (strcmp(newEntity, newEntitySearch->entity.name) == 0)
             return;
-        else if (strcmp(newEntity, newEntitySearch->entity.name) < 0) {
-            newEntityFather = newEntitySearch;
+        else if (strcmp(newEntity, newEntitySearch->entity.name) < 0)
             newEntitySearch = newEntitySearch->leftSon;
-        } else {
-            newEntityFather = newEntitySearch;
+        else
             newEntitySearch = newEntitySearch->rightSon;
-        }
     }
 
     // Se l'albero è pieno raddoppio la sua dimensione
@@ -156,91 +168,129 @@ void addent(char newEntity[]) {
     // Creo il nodo. Di default lo coloro di rosso
     strcpy(entityTree[entityElements]->entity.name, newEntity);
     entityTree[entityElements]->nodeColour = red;
-    *entityTree[entityElements]->rightSon = NIL;
-    *entityTree[entityElements]->leftSon = NIL;
+    *entityTree[entityElements]->rightSon = NIL_ENT;
+    *entityTree[entityElements]->leftSon = NIL_ENT;
     *entityTree[entityElements]->father = *newEntityFather;
 
-    /*
-     * Se il nuovo nodo è la radice dell'albero, viene inserito come radice, e padre e figli vengono settati a NULL.
-     * Il nodo viene colorato di nero
-     */
-    if (entityTree[entityElements]->father == &NIL)
-        entityTree[0]->nodeColour = black;
-    /*
-     * Se il padre del nodo è nero, l'albero è ok.
-     * Se il padre e lo zio sono rossi, li setto neri e setto il nonno rosso. A questo punto ricontrollo l'albero salendo fino alla radice
-     */
-    else if (entityTree[entityElements]->father->nodeColour == red) {
-        if (getEntityUncle(*entityTree[entityElements]) != &NIL && getEntityUncle(*entityTree[entityElements])->nodeColour == red) {
-            entityNode *checkedNode = entityTree[entityElements];
-            do {
-                if (checkedNode->father == &NIL)
-                    checkedNode->nodeColour = black;
-                checkedNode->father->nodeColour = black;
-                getEntityUncle(*checkedNode)->nodeColour = black;
-                getEntityGrandparent(*checkedNode)->nodeColour = red;
-                checkedNode = getEntityGrandparent(*checkedNode);
-            } while (getEntityUncle(*checkedNode) != &NIL && checkedNode->father == red && getEntityUncle(*checkedNode)->nodeColour == red);
+    // Inserimento
+    if (addedNode->father == &NIL_ENT)
+        entityRoot = entityTree[entityElements];
+    else if (strcmp(newEntity, newEntityFather->entity.name) < 0)
+        newEntityFather->leftSon = entityTree[entityElements];
+    else
+        newEntityFather->rightSon = entityTree[entityElements];
+
+    entityNode *temp;
+    entityNode *fixupCheck = entityTree[entityElements];
+    // Fixing dell'albero
+    while (fixupCheck->father->nodeColour == red){
+        if (fixupCheck->father == getEntityGrandparent(*fixupCheck)->leftSon){
+            temp = getEntityGrandparent(*fixupCheck)->rightSon;
+            if (temp->nodeColour == red){
+                fixupCheck->father->nodeColour = black;
+                temp->nodeColour = black;
+                getEntityGrandparent(*fixupCheck)->nodeColour = red;
+                fixupCheck = getEntityGrandparent(*fixupCheck);
+            }
+            else if (fixupCheck == fixupCheck->father->rightSon){
+                fixupCheck = fixupCheck->father;
+                rotateEntityLeft(fixupCheck);
+            }
+            // todo check qua, pag 236 libro, l'else non c'è ma credo vada aggiunto
+            else {
+                fixupCheck->father->nodeColour = black;
+                getEntityGrandparent(*fixupCheck)->nodeColour = red;
+                rotateEntityRight(getEntityGrandparent(*fixupCheck));
+            }
         }
-        /*
-         * Il padre è rosso.
-         * Se lo zio e nero, si fa una rotazione sinistra portando il nuovo elemento sull'esterno
-         */
         else {
-            // se è figlio dx di figlio sx
-            if (currentNode == currentNode->father->rightSon && currentNode->father == getEntityGrandparent(*currentNode)->leftSon)
-                rotateEntityLeft(currentNode->father);
-            // Se è figlio sx di figlio dx
-            else if (currentNode == currentNode->father->leftSon && currentNode->father == getEntityGrandparent(*currentNode)->rightSon)
-                rotateEntityRight(currentNode->father);
-            /*
-             * Se il padre è rosso e il nonno e lo zio sono neri.
-             * Sarà la situazione di nonno->sinistro->sinistro o nonno->destro->destro, perchè in teoria la rotazione è gia stata fatta prima
-             */
-            if (getEntityGrandparent(*currentNode)->nodeColour == black && getEntityUncle(*currentNode)->nodeColour == black){
-                currentNode->father->nodeColour = black;
-                getEntityGrandparent(*currentNode)->nodeColour = red;
-                if (currentNode == currentNode->father->leftSon && currentNode->father == getEntityGrandparent(*currentNode)->leftSon)
-                    rotateEntityRight(currentNode->father);
-                // teoricamente qui dovrebbe esserci n=n->father->right && n->father=gramfather(n)
-                else
-                    rotateEntityLeft(currentNode->father);
+            temp = getEntityGrandparent(*fixupCheck)->leftSon;
+            if (temp->nodeColour == red){
+                fixupCheck->father->nodeColour = black;
+                temp->nodeColour = black;
+                getEntityGrandparent(*fixupCheck)->nodeColour = red;
+                fixupCheck = getEntityGrandparent(*fixupCheck);
+            }
+            else if (fixupCheck == fixupCheck->father->leftSon){
+                fixupCheck = fixupCheck->father;
+                rotateEntityLeft(fixupCheck);
+            }
+            else {
+                fixupCheck->father->nodeColour = black;
+                getEntityGrandparent(*fixupCheck)->nodeColour = red;
+                rotateEntityRight(getEntityGrandparent(*fixupCheck));
             }
         }
     }
+    entityTree[0]->nodeColour = black;
+    entityElements++;
 }
 
 void delent(char deletedEntity[]){
-    entityNode *deletedNode = entityTree[0];
-    while (deletedNode != &NIL || strcmp(deletedNode->entity.name, deletedEntity) != 0){
-        if (strcmp(deletedNode->entity.name, deletedEntity) < 0 )
+    entityNode *deletedNode = entityRoot;
+    entityNode savedNode;
+    entityNode *pSavedNode = &savedNode;
+    entityNode *temp;
+    nodeColour savedNodeOriginalColor;
+
+    // Find the node to delete
+    while ( deletedNode != &NIL_ENT && strcmp(deletedEntity, deletedNode->entity.name) != 0 ){
+        if (strcmp(deletedEntity, deletedNode->entity.name) < 0)
             deletedNode = deletedNode->leftSon;
         else
             deletedNode = deletedNode->rightSon;
     }
-    if (deletedNode == &NIL)
+    if (deletedNode == &NIL_ENT)
         return;
 
-    /*
-     * Se un nodo ha due figli non foglia, si sostituisce con il valore minimo del sottoalbero sinistro o massimo del sottoalbero destro, per poi procedere all'eliminazioe del valore copiato.
-     * Il colore rimane invariato a quello vecchio del nodo eliminato, in modo da non violare le proprietà di colore
-     */
-    if (deletedNode->leftSon != &NIL && deletedNode->rightSon != &NIL){
-        entityNode *substituteNode = deletedNode;
-        if ()
+    savedNode = copyEntityNode(deletedNode);
+    savedNodeOriginalColor = savedNode.nodeColour;
+
+    if (deletedNode->leftSon == &NIL_ENT){
+        temp = deletedNode->rightSon;
+        transplantEntity(deletedNode, deletedNode->rightSon);
     }
+    else if (deletedNode->rightSon == &NIL_ENT){
+        temp = deletedNode->leftSon;
+        transplantEntity(deletedNode, deletedNode->leftSon);
+    }
+    else {
+        savedNode = copyEntityNode(entitySubMinimum(deletedNode->rightSon));
+        savedNodeOriginalColor = savedNode.nodeColour;
+        temp = savedNode.rightSon;
+        if (savedNode.father == deletedNode)
+            temp->father = deletedNode;
+        else {
+            transplantEntity(pSavedNode, pSavedNode->rightSon);
+            savedNode.rightSon = deletedNode->rightSon;
+            savedNode.rightSon->father = pSavedNode;
+        }
+        transplantEntity(deletedNode, pSavedNode);
+        pSavedNode->leftSon = deletedNode->leftSon;
+        pSavedNode->leftSon->father = pSavedNode;
+        pSavedNode->nodeColour = deletedNode->nodeColour;
+    }
+    // Fixing
+    if (savedNodeOriginalColor == black){
+        
+    }
+
 }
 
 void rotateEntityLeft(entityNode *subRoot){
     entityNode *temp;
 
     temp = subRoot->rightSon;
-    subRoot->rightSon = subRoot->rightSon->leftSon;
-    if (subRoot == subRoot->father->leftSon)
+    subRoot->rightSon = temp->leftSon;
+    if (temp->leftSon != &NIL_ENT)
+        temp->leftSon->father = subRoot;
+    temp->father = subRoot->father;
+    if (subRoot->father == &NIL_ENT)
+        entityRoot = temp;
+    else if (subRoot == subRoot->father->leftSon)
         subRoot->father->leftSon = temp;
     else
         subRoot->father->rightSon = temp;
-    temp->father = subRoot->father;
     temp->leftSon = subRoot;
     subRoot->father = temp;
 }
@@ -249,12 +299,42 @@ void rotateEntityRight(entityNode *subRoot) {
     entityNode *temp;
 
     temp = subRoot->leftSon;
-    subRoot->leftSon = subRoot->leftSon->rightSon;
-    if (subRoot == subRoot->father->leftSon)
-        subRoot->father->leftSon = temp;
-    else
-        subRoot->father->rightSon = temp;
+    subRoot->leftSon = temp->rightSon;
+    if (temp->rightSon != &NIL_ENT)
+        temp->rightSon->father = subRoot;
     temp->father = subRoot->father;
+    if (subRoot->father == &NIL_ENT)
+        entityRoot = temp;
+    else if (subRoot == subRoot->father->rightSon)
+        subRoot->father->rightSon = temp;
+    else
+        subRoot->father->leftSon = temp;
     temp->rightSon = subRoot;
     subRoot->father = temp;
+}
+
+void transplantEntity(entityNode *firstSubRoot, entityNode *secondSubRoot){
+    if (firstSubRoot->father == &NIL_ENT)
+        entityRoot = secondSubRoot;
+    else if (firstSubRoot == firstSubRoot->father->leftSon)
+        firstSubRoot->father->leftSon = secondSubRoot;
+    else
+        firstSubRoot->father->rightSon = secondSubRoot;
+    secondSubRoot->father = firstSubRoot->father;
+}
+
+entityNode *entitySubMinimum (entityNode *subRoot){
+    while (subRoot->leftSon != &NIL_ENT)
+        subRoot = subRoot->leftSon;
+    return subRoot;
+}
+
+entityNode copyEntityNode(entityNode *copiedNode){
+    entityNode copy;
+    copy.rightSon = copiedNode->rightSon;
+    copy.leftSon = copiedNode->leftSon;
+    copy.entity = copiedNode->entity;
+    copy.father = copiedNode->father;
+    copy.nodeColour = copiedNode->nodeColour;
+    return copy;
 }
