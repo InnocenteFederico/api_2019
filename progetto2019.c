@@ -99,8 +99,6 @@ int currentMaxRelationSize = 0;
 entityNode NIL_ENT;
 relationNode NIL_REL;
 
-int noneCheck = -1;
-
 /* ************ MAIN ************* */
 int main() {
     char inputBuffer[INPUT_BUFFER];
@@ -130,7 +128,7 @@ int main() {
     relationRoot = &NIL_REL;
 
     // raccoglie l'istruzione in input
-    fgets(inputBuffer, INPUT_BUFFER, stdin);
+    char* k = fgets(inputBuffer, INPUT_BUFFER, stdin);
 
     while (strcmp(inputBuffer, "end\n") != 0 ) {
 
@@ -149,7 +147,7 @@ int main() {
                 delrel(strtok(NULL, "\" \""), strtok(NULL, "\" \""), strtok(NULL, " \""));
         }
 
-        fgets(inputBuffer, INPUT_BUFFER, stdin);
+        k = fgets(inputBuffer, INPUT_BUFFER, stdin);
     }
 }
 
@@ -605,10 +603,12 @@ void report() {
     relationNode* stack[MAXIMUM_RELATION_STACK];
     int stackedElements = 0;
     int spaceCheck = -1;
+    int noneCheck = -1;
 
     // se l'albero delle relazioni è vuoto, stampa none e termina
     if (relationRoot == &NIL_REL){
-        printf("none\n");
+        fputs("none\n", stdout);
+        //printf("none\n");
         return;
     }
 
@@ -630,14 +630,24 @@ void report() {
         // altrimenti stampa e modifica il frag di controllo sulle stampe
         if (currentRelation->numberOfReceiver != 0) {
             if (spaceCheck == -1) {
-                printf("\"%s\"", currentRelation->relationName);
+                fputs("\"", stdout);
+                fputs(currentRelation->relationName, stdout);
+                fputs("\"", stdout);
+                //printf("\"%s\"", currentRelation->relationName);
                 spaceCheck = 1;
             }
-            else
-                printf(" \"%s\"", currentRelation->relationName);
+            else {
+                fputs(" \"", stdout);
+                fputs(currentRelation->relationName, stdout);
+                fputs("\"", stdout);
+                //printf(" \"%s\"", currentRelation->relationName);
+            }
             int i = 0;
             while (currentRelation->receivingList[i].receivingTimes == currentRelation->receivingList[0].receivingTimes) {
-                printf(" \"%s\"", currentRelation->receivingList[i].receiver->entityName);
+                fputs(" \"", stdout);
+                fputs(currentRelation->receivingList[i].receiver->entityName, stdout);
+                fputs("\"", stdout);
+                //printf(" \"%s\"", currentRelation->receivingList[i].receiver->entityName);
                 i++;
             }
             printf(" %d;", currentRelation->receivingList[0].receivingTimes);
@@ -646,9 +656,10 @@ void report() {
         currentRelation = currentRelation->rightSon;
     }
     if (noneCheck == -1)
-        printf("none");
-    printf("\n");
-    noneCheck = -1;
+        fputs("none", stdout);
+        //printf("none");
+    //printf ("\n");
+    fputs("\n", stdout);
 }
 
 void delent(char *deletedEntity) {}
