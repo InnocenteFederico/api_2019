@@ -4,8 +4,8 @@
 
 /* ********* COSTANTI ******** */
 
-#define NAMES_LENGTH 100
-#define INPUT_BUFFER 300
+#define NAMES_LENGTH 150
+#define INPUT_BUFFER 500
 #define ELEMENTS_STOCK 128
 #define RELATION_STOCK 16
 #define RECEIVING_ENTITY_STOCK 32
@@ -141,10 +141,18 @@ int main() {
                 addent(strtok(NULL, "\""));
             else if (strcmp(inputToken, "delent") == 0)
                 delent(strtok(NULL, "\""));
-            else if (strcmp(inputToken, "addrel") == 0)
-                addrel(strtok(NULL, "\" \""), strtok(NULL, "\" \""), strtok(NULL, " \""));
-            else if (strcmp(inputToken, "delrel") == 0)
-                delrel(strtok(NULL, "\" \""), strtok(NULL, "\" \""), strtok(NULL, " \""));
+            else if (strcmp(inputToken, "addrel") == 0) {
+                char *originEntity = inputToken = strtok(NULL, "\" \"");
+                char *destinationEntity = inputToken = strtok(NULL, "\" \"");
+                char *relation = inputToken = strtok(NULL, " \"");
+                addrel(originEntity, destinationEntity, relation);
+            }
+            else if (strcmp(inputToken, "delrel") == 0) {
+                char *originEntity = inputToken = strtok(NULL, "\" \"");
+                char *destinationEntity = inputToken = strtok(NULL, "\" \"");
+                char *relation = inputToken = strtok(NULL, " \"");
+                delrel(originEntity, destinationEntity, relation);
+            }
         }
 
         k = fgets(inputBuffer, INPUT_BUFFER, stdin);
@@ -368,6 +376,8 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
     entityNode *originEntityNode;
     relationNode *checkedNode;
     relationNode *checkedNodeFather;
+    relationNode* firstNode = &relationTree[0];
+    relationNode *addedNode = &relationTree[relationElements];
 
     // controllo che le entità esistano. le controllo una alla volta per ottimizzare, in quanto devo salvarmi i risultati
     originEntityNode = searchEntity(originEntity);
@@ -380,22 +390,21 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
 
     // gestisco a parte il caso della prima relazione inserita
     if (relationElements == 0) {
-        relationNode* addedNode = &relationTree[0];
-        strcpy(addedNode->relationName, relation);
-        addedNode->father = &NIL_REL;
-        addedNode->leftSon = &NIL_REL;
-        addedNode->rightSon = &NIL_REL;
-        addedNode->colour = black;
+        strcpy(firstNode->relationName, relation);
+        firstNode->father = &NIL_REL;
+        firstNode->leftSon = &NIL_REL;
+        firstNode->rightSon = &NIL_REL;
+        firstNode->colour = black;
         relationElements++;
-        relationRoot = addedNode;
-        addedNode->numberOfReceiver = 1;
-        addedNode->receivingList = malloc(RECEIVING_ENTITY_STOCK * sizeof(receivingNode));
-        addedNode->allocatedReceiver = RECEIVING_ENTITY_STOCK;
-        addedNode->receivingList[0].receivingTimes = 1;
-        addedNode->receivingList[0].receiver = destinationEntityNode;
-        addedNode->receivingList[0].originList = malloc(ORIGIN_ENTITY_STOCK * sizeof(entityNode*));
-        addedNode->receivingList[0].allocatedOrigins = ORIGIN_ENTITY_STOCK;
-        addedNode->receivingList[0].originList[0] = originEntityNode;
+        relationRoot = firstNode;
+        firstNode->numberOfReceiver = 1;
+        firstNode->receivingList = malloc(RECEIVING_ENTITY_STOCK * sizeof(receivingNode));
+        firstNode->allocatedReceiver = RECEIVING_ENTITY_STOCK;
+        firstNode->receivingList[0].receivingTimes = 1;
+        firstNode->receivingList[0].receiver = destinationEntityNode;
+        firstNode->receivingList[0].originList = malloc(ORIGIN_ENTITY_STOCK * sizeof(entityNode*));
+        firstNode->receivingList[0].allocatedOrigins = ORIGIN_ENTITY_STOCK;
+        firstNode->receivingList[0].originList[0] = originEntityNode;
         return;
     }
 
@@ -437,8 +446,6 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
     // codice ricavato dalle slide del corso
     // todo il nodo padre di dove metterlo l'ho gia trovato, la ricerca dovrebbe essere pero molto poco dispendiosa
     else {
-        relationNode *addedNode = &relationTree[relationElements];
-
         // Se l'albero è pieno raddoppio la sua dimensione
         while (relationElements >= currentMaxRelationSize) {
             currentMaxRelationSize *= 2;
@@ -643,7 +650,7 @@ void report() {
                 //printf(" \"%s\"", currentRelation->relationName);
             }
             int i = 0;
-            while (currentRelation->receivingList[i].receivingTimes == currentRelation->receivingList[0].receivingTimes) {
+            while (i < currentRelation->numberOfReceiver && currentRelation->receivingList[i].receivingTimes == currentRelation->receivingList[0].receivingTimes) {
                 fputs(" \"", stdout);
                 fputs(currentRelation->receivingList[i].receiver->entityName, stdout);
                 fputs("\"", stdout);
