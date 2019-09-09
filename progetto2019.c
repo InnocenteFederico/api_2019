@@ -282,23 +282,6 @@ void addent(char *newEntity) {
         return;
     }
 
-    // todo se scendo sotto tot potrebbe essere buono diminuire lo spazio allocato
-    if (freeEntityElements > 0){
-        addedNode = freeEntityPosition[entityElements - 1];
-        freeEntityElements--;
-       // printf("- vecchio -\n");
-    }
-    else {
-        // Se l'albero è pieno raddoppio la sua dimensione
-        if (entityElements >= currentMaxEntitySize) {
-            currentMaxEntitySize *= 2;
-            entityTree = (entityNode *) realloc(entityTree, currentMaxEntitySize * sizeof(entityNode));
-        }
-        addedNode = &entityTree[entityElements];
-        entityElements++;
-       // printf("- nuovo -\n");
-    }
-
     //calcolo il padre del nuovo elemento. Se l'elemento è gia presente, esco dalla funzione
     while (newEntitySearch != &NIL_ENT) {
         newEntityFather = newEntitySearch;
@@ -308,6 +291,21 @@ void addent(char *newEntity) {
             newEntitySearch = newEntitySearch->leftSon;
         else
             newEntitySearch = newEntitySearch->rightSon;
+    }
+
+    // todo se scendo sotto tot potrebbe essere buono diminuire lo spazio allocato
+    if (freeEntityElements > 0){
+        addedNode = freeEntityPosition[freeEntityElements - 1];
+        freeEntityElements--;
+    }
+    else {
+        // Se l'albero è pieno raddoppio la sua dimensione
+        if (entityElements >= currentMaxEntitySize) {
+            currentMaxEntitySize *= 2;
+            entityTree = (entityNode *) realloc(entityTree, currentMaxEntitySize * sizeof(entityNode));
+        }
+        addedNode = &entityTree[entityElements];
+        entityElements++;
     }
 
     // Creo il nodo. Di default lo coloro di rosso
@@ -551,7 +549,7 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
                 break;
         }
     }
-    // controllo che i ricevente in causa (i) non debba scalare la classifica per aver aumentato il numero di relazioni
+    // controllo che il ricevente in causa (i) non debba scalare la classifica per aver aumentato il numero di relazioni
     receivingNode temp;
     for (int j = i; j > 0; j--){
         // se il ricevente ha piu relazioni di quello che lo precede oppure ha lo stesso numero di relazioni ma viene prima alfabeticamente, li inverto
@@ -750,11 +748,23 @@ void delrel(char *originEntity, char *destinationEntity, char *relation) {
     }
     deletedReceiver->receivingTimes--;
 
+    // devo ricalcolare la classifica dei riceventi se necessario, abbassando quello che ha appena perso un mittente
+    int k;
+    for (k = i; k < deletedRelation->numberOfReceiver - 1; k++){
+        if (deletedRelation->receivingList[k].receivingTimes < deletedRelation->receivingList[k+1].receivingTimes || ( deletedRelation->receivingList[k].receivingTimes == deletedRelation->receivingList[k+1].receivingTimes && strcmp(deletedRelation->receivingList[k].receiver->entityName, deletedRelation->receivingList[k+1].receiver->entityName) > 0 ) ){
+            receivingNode temp = deletedRelation->receivingList[k];
+            deletedRelation->receivingList[k] = deletedRelation->receivingList[k+1];
+            deletedRelation->receivingList[k+1] = temp;
+        }
+        else
+            break;
+    }
+
     // se il mittente rimane senza origini, lo elimino e diminuisco i numero di mittenti nella relazione.
     // devo liberare la memoria allocata per i mittenti e scalare tutti i riceventi successivi
     if (deletedReceiver->receivingTimes == 0){
         free(deletedReceiver->originList);
-        for (int j = i; j < deletedRelation->numberOfReceiver - 1 ; j++){
+        for (int j = k; j < deletedRelation->numberOfReceiver - 1 ; j++){
             deletedRelation->receivingList[j] = deletedRelation->receivingList[j+1];
         }
         deletedRelation->numberOfReceiver--;
@@ -798,69 +808,87 @@ void delent(char *deletedEntity) {
 
     // scorro le relazioni per eliminare le entità
     for (int i = 0; i < relationElements; i++) {
-        relationNode checkedRelation = relationTree[i];
         // per ogni relazione controllo tutte le entità riceventi
-        for (int j = 0; j < checkedRelation.numberOfReceiver; j++) {
-            receivingNode checkedReceiver = checkedRelation.receivingList[j];
+        for (int j = 0; j < relationTree[i].numberOfReceiver; j++) {
+            receivingNode* checkedReceiver = &relationTree[i].receivingList[j];
             // se l'entità ricevente è quella eliminata, elimino tutto e libero la memoria
-            if (checkedReceiver.receiver == deletedEntityNode) {
+            if (checkedReceiver->receiver == deletedEntityNode) {
                 // libero la memoria dedicata ai mittenti
-                free(checkedReceiver.originList);
-                // sposto di uno in avanti tutti i riceventi rimanenti
-                for (int k = j; k < checkedRelation.numberOfReceiver - 1; ++k) {
-                    checkedRelation.receivingList[k] = checkedRelation.receivingList[k + 1];
+                free(checkedReceiver->originList);
+                // sposto di uno in indietro tutti i riceventi rimanenti
+                for (int k = j; k < relationTree[i].numberOfReceiver - 1; ++k) {
+                    relationTree[i].receivingList[k] = relationTree[i].receivingList[k + 1];
                 }
-                checkedRelation.numberOfReceiver--;
+                relationTree[i].numberOfReceiver--;
                 // diminuisco di uno j per far controllare il prossimo nodo, che altrimenti sarebbe saltato
                 j--;
                 // se serve riduco la memoria allocata
-                if (checkedRelation.numberOfReceiver < checkedRelation.allocatedReceiver / 3 &&
-                    checkedRelation.allocatedReceiver > RECEIVING_ENTITY_STOCK) {
-                    checkedRelation.receivingList = (receivingNode *) realloc(checkedRelation.receivingList,
-                                                                              checkedRelation.allocatedReceiver / 2);
+                if (relationTree[i].numberOfReceiver < relationTree[i].allocatedReceiver / 3 &&
+                    relationTree[i].allocatedReceiver > RECEIVING_ENTITY_STOCK) {
+                    relationTree[i].receivingList = (receivingNode *) realloc(relationTree[i].receivingList,
+                                                                              relationTree[i].allocatedReceiver / 2);
                 }
             }
-                // se non è l'entità eliminata, faccio una ricerca binaria tra i mittenti. se lo trovo, sposto tutto ciò che c'è oltre in avanti di uno
-                // se il mittente era unico, devo cancellare il ricevente e eventualmente riallocare
+            // se non è l'entità eliminata, faccio una ricerca binaria tra i mittenti. se lo trovo, sposto tutto ciò che c'è oltre indietro di uno
+            // se il mittente era unico, devo cancellare il ricevente e eventualmente riallocare
             else {
                 int bot = 0;
-                int top = checkedReceiver.receivingTimes - 1;
+                int top = checkedReceiver->receivingTimes - 1;
                 int mid = 0;
                 int foundFlag = -1;
                 while (foundFlag == -1 && bot <= top) {
                     mid = (bot + top) / 2;
-                    if (checkedReceiver.originList[mid] == deletedEntityNode)
+                    if (checkedReceiver->originList[mid] == deletedEntityNode)
                         foundFlag = 1;
-                    else if (strcmp(deletedEntity, checkedReceiver.originList[mid]->entityName) < 0)
+                    else if (strcmp(deletedEntity, checkedReceiver->originList[mid]->entityName) < 0)
                         top = mid - 1;
                     else
                         bot = mid + 1;
                 }
                 // se non l'ho trovato non faccio niente, altrimenti lo elimino
                 if (foundFlag == 1) {
-                    for (int k = mid; k < checkedReceiver.receivingTimes - 1; k++) {
-                        checkedReceiver.originList[k] = checkedReceiver.originList[k + 1];
+                    for (int k = mid; k < checkedReceiver->receivingTimes - 1; k++) {
+                        checkedReceiver->originList[k] = checkedReceiver->originList[k + 1];
                     }
-                    checkedReceiver.receivingTimes--;
+                    checkedReceiver->receivingTimes--;
                     // se serve rialloco lo spazio
-                    if (checkedReceiver.receivingTimes < checkedReceiver.allocatedOrigins / 3 &&
-                        checkedReceiver.allocatedOrigins > ORIGIN_ENTITY_STOCK)
-                        checkedReceiver.originList = (entityNode **) realloc(checkedReceiver.originList,
-                                                                             checkedReceiver.allocatedOrigins / 2);
+                    if (checkedReceiver->receivingTimes < checkedReceiver->allocatedOrigins / 3 &&
+                        checkedReceiver->allocatedOrigins > ORIGIN_ENTITY_STOCK)
+                        checkedReceiver->originList = (entityNode **) realloc(checkedReceiver->originList,
+                                                                             checkedReceiver->allocatedOrigins / 2);
 
                     // se non sono rimasti piu mittenti, devo cancellare il ricevente
-                    if (checkedReceiver.receivingTimes == 0) {
-                        free(checkedReceiver.originList);
-                        for (int k = j; k < checkedRelation.numberOfReceiver - 1; k++) {
-                            checkedRelation.receivingList[k] = checkedRelation.receivingList[k + 1];
+                    if (checkedReceiver->receivingTimes == 0) {
+                        free(checkedReceiver->originList);
+                        for (int k = j; k < relationTree[i].numberOfReceiver - 1; k++) {
+                            relationTree[i].receivingList[k] = relationTree[i].receivingList[k + 1];
                         }
-                        checkedRelation.numberOfReceiver--;
+                        relationTree[i].numberOfReceiver--;
+                        j--;
                         // evntualmente diminuisco lo spazio destinato ai riceevnti
-                        if (checkedRelation.numberOfReceiver < checkedRelation.allocatedReceiver / 3 &&
-                            checkedRelation.allocatedReceiver > RECEIVING_ENTITY_STOCK)
-                            checkedRelation.receivingList = (receivingNode *) realloc(checkedRelation.receivingList,
-                                                                                      checkedRelation.allocatedReceiver /
+                        if (relationTree[i].numberOfReceiver < relationTree[i].allocatedReceiver / 3 &&
+                            relationTree[i].allocatedReceiver > RECEIVING_ENTITY_STOCK)
+                            relationTree[i].receivingList = (receivingNode *) realloc(relationTree[i].receivingList,
+                                                                                      relationTree[i].allocatedReceiver /
                                                                                       2);
+                    }
+                    // se invece sono rimasti dei mittenti, devo far scalare il ricevente nella nuova posizione ordinata
+                    // todo riscalando ora le posizioni vado a ricontrollare le cose scalate. facendo tutto in fondo però impiego piu tempo a riordinare.
+                    // todo controllare in caso ci siano problemi di tempo
+                    else {
+                        int moveFlag = -1;
+                        for (int k = j; k < relationTree[i].numberOfReceiver - 1; k++){
+                            if (relationTree[i].receivingList[k].receivingTimes < relationTree[i].receivingList[k+1].receivingTimes || (relationTree[i].receivingList[k].receivingTimes == relationTree[i].receivingList[k+1].receivingTimes && strcmp(relationTree[i].receivingList[k].receiver->entityName, relationTree[i].receivingList[k+1].receiver->entityName) > 0)){
+                                receivingNode temp = relationTree[i].receivingList[k];
+                                relationTree[i].receivingList[k] = relationTree[i].receivingList[k+1];
+                                relationTree[i].receivingList[k+1] = temp;
+                                moveFlag = 1;
+                            }
+                            else
+                                break;
+                        }
+                        if (moveFlag == 1)
+                            j--;
                     }
                 }
             }
@@ -892,7 +920,7 @@ void delent(char *deletedEntity) {
         deleteEntityFixUp(x);
 
     // y è la cella che è stata liberata
-    if (freeEntityElements >= freeEntityAllocated){
+    if (freeEntityElements >= freeEntityAllocated - 1){
           freeEntityAllocated += FREE_ENTITY_STOCK;
           freeEntityPosition = (entityNode**) realloc(freeEntityPosition, freeEntityAllocated * sizeof(entityNode*));
     }
