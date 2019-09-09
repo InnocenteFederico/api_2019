@@ -4,13 +4,14 @@
 
 /* ********* COSTANTI ******** */
 
-#define NAMES_LENGTH 150
-#define INPUT_BUFFER 500
-#define ELEMENTS_STOCK 128
+#define NAMES_LENGTH 100
+#define INPUT_BUFFER 350
+#define ELEMENTS_STOCK 516
 #define RELATION_STOCK 16
 #define RECEIVING_ENTITY_STOCK 32
 #define ORIGIN_ENTITY_STOCK 32
 #define MAXIMUM_RELATION_STACK 8
+#define FREE_ENTITY_STOCK 256
 
 
 /* ********* DEFINIZIONE TIPI *********** */
@@ -77,9 +78,14 @@ void delrel(char *originEntity, char *destinationEntity, char *relation);
 // funzioni per il fixup degli alberi RB
 void insertEntityFixUp(entityNode *addedEntity);
 void insertRelationFixUp(relationNode *addedRelation);
+void deleteEntityFixUp(entityNode* x);
 
 // funzione per la ricerca di un entità nell'albero
 entityNode *searchEntity(char *researchedEntity);
+
+// funzioni ausiliarie delent
+entityNode* treeSuccessorEntity (entityNode* x);
+entityNode* treeMinimumEntity (entityNode* x);
 
 
 /* ************ VARIABILI GLOBALI *********** */
@@ -99,6 +105,10 @@ int currentMaxRelationSize = 0;
 entityNode NIL_ENT;
 relationNode NIL_REL;
 
+entityNode** freeEntityPosition;
+int freeEntityElements = 0;
+int freeEntityAllocated = 0;
+
 /* ************ MAIN ************* */
 int main() {
     char inputBuffer[INPUT_BUFFER];
@@ -109,6 +119,9 @@ int main() {
     currentMaxEntitySize = ELEMENTS_STOCK;
     relationTree = malloc(RELATION_STOCK * sizeof(relationNode));
     currentMaxRelationSize = RELATION_STOCK;
+
+    freeEntityPosition = malloc(FREE_ENTITY_STOCK * sizeof(entityNode*));
+    freeEntityAllocated = FREE_ENTITY_STOCK;
 
     // costruisce i nodi NIL per le relazioni e le entità
     strcpy(NIL_ENT.entityName, "NIL_ENT");
@@ -255,9 +268,10 @@ void rightRotateRelation(relationNode *rotationRoot) {
 void addent(char *newEntity) {
     entityNode *newEntityFather = &NIL_ENT;
     entityNode *newEntitySearch = entityRoot;
-    entityNode *addedNode = &entityTree[entityElements];
+    entityNode *addedNode;
 
     if (entityElements == 0) {
+        addedNode = &entityTree[0];
         strcpy(addedNode->entityName, newEntity);
         addedNode->father = &NIL_ENT;
         addedNode->leftSon = &NIL_ENT;
@@ -268,10 +282,21 @@ void addent(char *newEntity) {
         return;
     }
 
-    // Se l'albero è pieno raddoppio la sua dimensione
-    while (entityElements >= currentMaxEntitySize) {
-        currentMaxEntitySize *= 2;
-        entityTree = (entityNode *) realloc(entityTree, currentMaxEntitySize * sizeof(entityNode));
+    // todo se scendo sotto tot potrebbe essere buono diminuire lo spazio allocato
+    if (freeEntityElements > 0){
+        addedNode = freeEntityPosition[entityElements - 1];
+        freeEntityElements--;
+       // printf("- vecchio -\n");
+    }
+    else {
+        // Se l'albero è pieno raddoppio la sua dimensione
+        if (entityElements >= currentMaxEntitySize) {
+            currentMaxEntitySize *= 2;
+            entityTree = (entityNode *) realloc(entityTree, currentMaxEntitySize * sizeof(entityNode));
+        }
+        addedNode = &entityTree[entityElements];
+        entityElements++;
+       // printf("- nuovo -\n");
     }
 
     //calcolo il padre del nuovo elemento. Se l'elemento è gia presente, esco dalla funzione
@@ -299,9 +324,6 @@ void addent(char *newEntity) {
     addedNode->leftSon = &NIL_ENT;
 
     insertEntityFixUp(addedNode);
-
-    // aggiorno il numero di elementi che sono salvati nell'albero
-    entityElements++;
 }
 
 /*
@@ -377,7 +399,7 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
     relationNode *checkedNode;
     relationNode *checkedNodeFather;
     relationNode* firstNode = &relationTree[0];
-    relationNode *addedNode = &relationTree[relationElements];
+    relationNode *addedNode;
 
     // controllo che le entità esistano. le controllo una alla volta per ottimizzare, in quanto devo salvarmi i risultati
     originEntityNode = searchEntity(originEntity);
@@ -451,6 +473,8 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
             currentMaxRelationSize *= 2;
             relationTree = (relationNode *) realloc(relationTree, currentMaxRelationSize * sizeof(relationNode));
         }
+
+        addedNode = &relationTree[relationElements];
 
         //codice preso dalle slide del corso
         strcpy(addedNode->relationName, relation);
@@ -669,7 +693,287 @@ void report() {
     fputs("\n", stdout);
 }
 
-void delent(char *deletedEntity) {}
+void delrel(char *originEntity, char *destinationEntity, char *relation) {
+    // non serve controllare che le entità esistano, poichè se non esistono non saranno comprese nella relazione
+    relationNode *deletedRelation;
+    receivingNode *deletedReceiver;
+    int originPosition;
 
-void delrel(char *originEntity, char *destinationEntity, char *relation) {}
+    // cerco la relazione assegnata. se non esiste, termino
+    deletedRelation = relationRoot;
+    while (deletedRelation != &NIL_REL && strcmp(deletedRelation->relationName, relation) != 0 ){
+        if (strcmp(relation, deletedRelation->relationName) < 0)
+            deletedRelation = deletedRelation->leftSon;
+        else
+            deletedRelation = deletedRelation->rightSon;
+    }
+    if (deletedRelation == &NIL_REL)
+        return;
 
+    // cerco il ricevente nella lista. non essendo ordinata alfabeticamente, devo scorrere tutto. se non la trovo termino
+    int i = 0;
+    while ( i < deletedRelation->numberOfReceiver && strcmp(deletedRelation->receivingList[i].receiver->entityName, destinationEntity) != 0){
+        i++;
+    }
+    if (i == deletedRelation->numberOfReceiver)
+        return;
+    else {
+        deletedReceiver = &deletedRelation->receivingList[i];
+    }
+
+    // faccio una ricerca binaria per trovare il mittente. se non lo trovo, termino.
+    int bot = 0;
+    int top = deletedReceiver->receivingTimes - 1;
+    int findFlag = -1;
+    int mid = 0;
+    while (findFlag == -1 && bot <= top){
+        mid = (bot + top) / 2;
+        if (strcmp(deletedReceiver->originList[mid]->entityName, originEntity) == 0 )
+            findFlag = 1;
+        else{
+            if (strcmp(originEntity, deletedReceiver->receiver[mid].entityName) < 0)
+                top = mid - 1;
+            else
+                bot = mid + 1;
+        }
+    }
+    if (findFlag == -1)
+        return;
+    else
+        originPosition = mid;
+
+    // rimuovo l'origine dalla lista, scalo tutte le origini rimanenti oltre quella eliminata di uno a sinistra per mantenere l'ordine alfabetico
+    // abbasso il numero di origini per quel ricevente di uno, e se necessario rialloco il vettore dei riceventi per diminuirlo di dimensione
+    // per rimuoverlo mi basta coprirlo con la scalata dei sucessivi e la riduzione di uno del totale
+    for (int j = originPosition; j < deletedReceiver->receivingTimes - 1; j++){
+        deletedReceiver->originList[j] = deletedReceiver->originList[j+1];
+    }
+    deletedReceiver->receivingTimes--;
+
+    // se il mittente rimane senza origini, lo elimino e diminuisco i numero di mittenti nella relazione.
+    // devo liberare la memoria allocata per i mittenti e scalare tutti i riceventi successivi
+    if (deletedReceiver->receivingTimes == 0){
+        free(deletedReceiver->originList);
+        for (int j = i; j < deletedRelation->numberOfReceiver - 1 ; j++){
+            deletedRelation->receivingList[j] = deletedRelation->receivingList[j+1];
+        }
+        deletedRelation->numberOfReceiver--;
+        if (deletedRelation->numberOfReceiver < deletedRelation->allocatedReceiver / 3 && deletedRelation->allocatedReceiver > RECEIVING_ENTITY_STOCK)
+            deletedRelation->receivingList = (receivingNode*) realloc(deletedRelation->receivingList, deletedRelation->allocatedReceiver / 2);
+    }
+    // riduco la dimensione solo se scendo sotto il terzo degli elementi allocati effettivamente presenti (riduco di metà)
+    // faccio un terzo e non la metà per evitare che una cancellazione e inserimento successivi e ripetuti mi facciano fare troppe realloc
+    // todo se la memoria allocata è minore di uno stock non riduco, perchè non dovrebbe essere eccessivamente rilevane e qualora arrivasse a dimensioni piccole mi causerebbe realloc continue
+    // todo valutare se ridurre quando scendo sotto il quarto per mantenere abbastanza spazi liberi per aggiungere nuove origini (analogo sopra)
+    else if (deletedReceiver->receivingTimes < deletedReceiver->allocatedOrigins / 3 && deletedReceiver->allocatedOrigins > ORIGIN_ENTITY_STOCK){
+        deletedReceiver->originList = (entityNode**) realloc(deletedReceiver->originList, deletedReceiver->allocatedOrigins / 2);
+    }
+}
+
+/*
+ * Per cancellare un entità bisogna innanzitutto verificare che questa esista, altrimenti termina. se esiste ci salvo un puntatore
+ * a questo punto scorro tutte le relazioni, e per ogni relazione verifico tutti i riceventi.
+ * se il ricevente è l'entità stessa, libero la memoria associata all sue oigini, cancello il ricevente e scalo tutto quello che c'è dopo avanti di uno.
+ * se il ricevente è un altra entità, faccio una ricerca binaria per verificare se possiede l'entità eliminata come origine.
+ * se così è, la cancello e sposto tutto quello che c'è dopo avanti di uno per mantenere l'ordine alfabetico, e diminuisco di uno il numero di mittenti.
+ * se serve, rimpicciolisco lo spazio allocato per i mittenti
+ * a questo punto devo cancellare l'entità dalle relazioni:
+ * mi salvo un puntatore esterno all'entità e eseguo l'algoritmo di eliminazione per gli alberi rosso neri.
+ * a questo punto, per riempire il buco in memoria lasciato dall'entità eliminata, la sostituisco tramite il puntatore esterno con l'ultima entità salvata nella lista.
+ * diminuisco il numero di entità salvate di uno e, se serve, riduco il numero di entità allocate
+ *
+ */
+void delent(char *deletedEntity) {
+    entityNode *deletedEntityNode = entityRoot;
+
+    // verifico che l'entità esista, se non esiste termino
+    while (deletedEntityNode != &NIL_ENT && strcmp(deletedEntityNode->entityName, deletedEntity) != 0) {
+        if (strcmp(deletedEntity, deletedEntityNode->entityName) < 0)
+            deletedEntityNode = deletedEntityNode->leftSon;
+        else
+            deletedEntityNode = deletedEntityNode->rightSon;
+    }
+    if (deletedEntityNode == &NIL_ENT)
+        return;
+
+    // scorro le relazioni per eliminare le entità
+    for (int i = 0; i < relationElements; i++) {
+        relationNode checkedRelation = relationTree[i];
+        // per ogni relazione controllo tutte le entità riceventi
+        for (int j = 0; j < checkedRelation.numberOfReceiver; j++) {
+            receivingNode checkedReceiver = checkedRelation.receivingList[j];
+            // se l'entità ricevente è quella eliminata, elimino tutto e libero la memoria
+            if (checkedReceiver.receiver == deletedEntityNode) {
+                // libero la memoria dedicata ai mittenti
+                free(checkedReceiver.originList);
+                // sposto di uno in avanti tutti i riceventi rimanenti
+                for (int k = j; k < checkedRelation.numberOfReceiver - 1; ++k) {
+                    checkedRelation.receivingList[k] = checkedRelation.receivingList[k + 1];
+                }
+                checkedRelation.numberOfReceiver--;
+                // diminuisco di uno j per far controllare il prossimo nodo, che altrimenti sarebbe saltato
+                j--;
+                // se serve riduco la memoria allocata
+                if (checkedRelation.numberOfReceiver < checkedRelation.allocatedReceiver / 3 &&
+                    checkedRelation.allocatedReceiver > RECEIVING_ENTITY_STOCK) {
+                    checkedRelation.receivingList = (receivingNode *) realloc(checkedRelation.receivingList,
+                                                                              checkedRelation.allocatedReceiver / 2);
+                }
+            }
+                // se non è l'entità eliminata, faccio una ricerca binaria tra i mittenti. se lo trovo, sposto tutto ciò che c'è oltre in avanti di uno
+                // se il mittente era unico, devo cancellare il ricevente e eventualmente riallocare
+            else {
+                int bot = 0;
+                int top = checkedReceiver.receivingTimes - 1;
+                int mid = 0;
+                int foundFlag = -1;
+                while (foundFlag == -1 && bot <= top) {
+                    mid = (bot + top) / 2;
+                    if (checkedReceiver.originList[mid] == deletedEntityNode)
+                        foundFlag = 1;
+                    else if (strcmp(deletedEntity, checkedReceiver.originList[mid]->entityName) < 0)
+                        top = mid - 1;
+                    else
+                        bot = mid + 1;
+                }
+                // se non l'ho trovato non faccio niente, altrimenti lo elimino
+                if (foundFlag == 1) {
+                    for (int k = mid; k < checkedReceiver.receivingTimes - 1; k++) {
+                        checkedReceiver.originList[k] = checkedReceiver.originList[k + 1];
+                    }
+                    checkedReceiver.receivingTimes--;
+                    // se serve rialloco lo spazio
+                    if (checkedReceiver.receivingTimes < checkedReceiver.allocatedOrigins / 3 &&
+                        checkedReceiver.allocatedOrigins > ORIGIN_ENTITY_STOCK)
+                        checkedReceiver.originList = (entityNode **) realloc(checkedReceiver.originList,
+                                                                             checkedReceiver.allocatedOrigins / 2);
+
+                    // se non sono rimasti piu mittenti, devo cancellare il ricevente
+                    if (checkedReceiver.receivingTimes == 0) {
+                        free(checkedReceiver.originList);
+                        for (int k = j; k < checkedRelation.numberOfReceiver - 1; k++) {
+                            checkedRelation.receivingList[k] = checkedRelation.receivingList[k + 1];
+                        }
+                        checkedRelation.numberOfReceiver--;
+                        // evntualmente diminuisco lo spazio destinato ai riceevnti
+                        if (checkedRelation.numberOfReceiver < checkedRelation.allocatedReceiver / 3 &&
+                            checkedRelation.allocatedReceiver > RECEIVING_ENTITY_STOCK)
+                            checkedRelation.receivingList = (receivingNode *) realloc(checkedRelation.receivingList,
+                                                                                      checkedRelation.allocatedReceiver /
+                                                                                      2);
+                    }
+                }
+            }
+        }
+    }
+
+    // a questo punto devo eliminare l'entità
+    // codice preso da rb-delete delle slide
+    entityNode *y;
+    entityNode *x;
+    if (deletedEntityNode->leftSon == &NIL_ENT || deletedEntityNode->rightSon == &NIL_ENT)
+        y = deletedEntityNode;
+    else
+        y = treeSuccessorEntity(deletedEntityNode);
+    if (y->leftSon != &NIL_ENT)
+        x = y->leftSon;
+    else
+        x = y->rightSon;
+    x->father = y->father;
+    if (y->father == &NIL_ENT)
+        entityRoot = x;
+    else if (y == y->father->leftSon)
+        y->father->leftSon = x;
+    else
+        y->father->rightSon = x;
+    if (y != deletedEntityNode)
+        strcpy(deletedEntityNode->entityName, y->entityName);
+    if (y->colour == black)
+        deleteEntityFixUp(x);
+
+    // y è la cella che è stata liberata
+    if (freeEntityElements >= freeEntityAllocated){
+          freeEntityAllocated += FREE_ENTITY_STOCK;
+          freeEntityPosition = (entityNode**) realloc(freeEntityPosition, freeEntityAllocated * sizeof(entityNode*));
+    }
+    freeEntityPosition[freeEntityElements] = y;
+    freeEntityElements++;
+}
+
+// presa dalle slide
+entityNode* treeSuccessorEntity (entityNode* x) {
+    if (x->rightSon != &NIL_ENT)
+        return treeMinimumEntity(x->rightSon);
+    entityNode* y = x->father;
+    while (y != &NIL_ENT && x == y->rightSon){
+        x = y;
+        y = y->father;
+    }
+    return y;
+}
+
+// presa dalle slide
+entityNode* treeMinimumEntity (entityNode* x){
+    while (x->leftSon != &NIL_ENT)
+        x = x->leftSon;
+    return x;
+}
+
+// presa dalle slide del corso
+void deleteEntityFixUp(entityNode* x){
+    entityNode* w;
+
+    if (x->colour == red || x->father == &NIL_ENT){
+        x->colour = black;
+    }
+    else if (x == x->father->leftSon){
+        w = x->father->rightSon;
+        if (w->colour == red){
+            w->colour = black;
+            x->father->colour = red;
+            leftRotateEntity(x->father);
+            w = x->father->rightSon;
+        }
+        if (w->leftSon->colour == black && w->rightSon->colour == black){
+            w->colour = red;
+            deleteEntityFixUp(x->father);
+        }
+        else {
+            if (w->rightSon->colour == black){
+                w->leftSon->colour = black;
+                w->colour = red;
+                rightRotateEntity(w);
+                w = x->father->rightSon;
+            }
+            w->colour = x->father->colour;
+            x->father->colour = black;
+            w->rightSon->colour = black;
+            leftRotateEntity(x->father);
+        }
+    }
+    else{
+        w = x->father->leftSon;
+        if (w->colour == red){
+            w->colour = black;
+            x->father->colour = red;
+            rightRotateEntity(x->father);
+            w = x->father->leftSon;
+        }
+        if (w->rightSon->colour == black && w->leftSon->colour == black){
+            w->colour = red;
+            deleteEntityFixUp(x->father);
+        }
+        else {
+            if (w->leftSon->colour == black){
+                w->rightSon->colour = black;
+                w->colour = red;
+                leftRotateEntity(w);
+                w = x->father->leftSon;
+            }
+            w->colour = x->father->colour;
+            x->father->colour = black;
+            w->leftSon->colour = black;
+            rightRotateEntity(x->father);
+        }
+    }
+}
