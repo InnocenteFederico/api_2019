@@ -145,6 +145,9 @@ int main() {
 
     while (strcmp(inputBuffer, "end\n") != 0 ) {
 
+        if (strcmp(inputBuffer, "delent \"The_Teller\"\n") == 0)
+            printf("c");
+
         if (strcmp(inputBuffer, "report\n") == 0)
             report();
         else {
