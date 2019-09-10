@@ -79,6 +79,8 @@ void delrel(char *originEntity, char *destinationEntity, char *relation);
 void insertEntityFixUp(entityNode *addedEntity);
 void insertRelationFixUp(relationNode *addedRelation);
 void deleteEntityFixUp(entityNode* x);
+void entityTransplant (entityNode* u, entityNode* v);
+entityNode* entityMinimum (entityNode* x);
 
 // funzione per la ricerca di un entità nell'albero
 entityNode *searchEntity(char *researchedEntity);
@@ -145,11 +147,13 @@ int main() {
 
     while (strcmp(inputBuffer, "end\n") != 0 ) {
 
-        if (strcmp(inputBuffer, "delent \"The_Teller\"\n") == 0)
-            printf("c");
+        int a;
+        if (strcmp(inputBuffer, "addrel \"Airiam\" \"BEtor\" \"older_than\"\n") == 0)
+            a = 1;
 
         if (strcmp(inputBuffer, "report\n") == 0)
             report();
+
         else {
             inputToken = strtok(inputBuffer, " \"");
 
@@ -447,7 +451,7 @@ void addrel(char *originEntity, char *destinationEntity, char *relation) {
         for(int i = 0; i < checkedNode->numberOfReceiver; i++){
             // se ho trovato il ricevente, poi esco dal ciclo perche compare un unica volta
             if (strcmp(destinationEntity, checkedNode->receivingList[i].receiver->entityName) == 0){
-                // se ho trovato il mittente cerco il destinatario.
+                // se ho trovato il destinatario cerco il mitente.
                 // effettuo una ricerca binaria, essendo i mittenti ordinati in maniera alfabetica
                 int underBound = 0;
                 int upperBound = checkedNode->receivingList[i].receivingTimes - 1;
@@ -732,7 +736,7 @@ void delrel(char *originEntity, char *destinationEntity, char *relation) {
         if (strcmp(deletedReceiver->originList[mid]->entityName, originEntity) == 0 )
             findFlag = 1;
         else{
-            if (strcmp(originEntity, deletedReceiver->receiver[mid].entityName) < 0)
+            if (strcmp(originEntity, deletedReceiver->originList[mid]->entityName) < 0)
                 top = mid - 1;
             else
                 bot = mid + 1;
@@ -900,7 +904,7 @@ void delent(char *deletedEntity) {
 
     // a questo punto devo eliminare l'entità
     // codice preso da rb-delete delle slide
-    entityNode *y;
+    /*entityNode *y;
     entityNode *x;
     if (deletedEntityNode->leftSon == &NIL_ENT || deletedEntityNode->rightSon == &NIL_ENT)
         y = deletedEntityNode;
@@ -921,13 +925,46 @@ void delent(char *deletedEntity) {
         strcpy(deletedEntityNode->entityName, y->entityName);
     if (y->colour == black)
         deleteEntityFixUp(x);
+        */
 
-    // y è la cella che è stata liberata
+    // elmino l'entità, codice preso dal manuale
+    entityNode* y = deletedEntityNode;
+    entityNode* x;
+    colour yOriginalColour = y->colour;
+    if (deletedEntityNode->leftSon == &NIL_ENT){
+        x = deletedEntityNode->rightSon;
+        entityTransplant(deletedEntityNode, deletedEntityNode->rightSon);
+    }
+    else if (deletedEntityNode->rightSon == &NIL_ENT){
+        x = deletedEntityNode->leftSon;
+        entityTransplant(deletedEntityNode, deletedEntityNode->leftSon);
+    }
+    else {
+        y = entityMinimum(deletedEntityNode->rightSon);
+        yOriginalColour = y->colour;
+        x = y->rightSon;
+        if (y->father == deletedEntityNode)
+            x->father = y;
+        else {
+            entityTransplant(y, y->rightSon);
+            y->rightSon = deletedEntityNode->rightSon;
+            y->rightSon->father = y;
+        }
+        entityTransplant(deletedEntityNode, y);
+        y->leftSon = deletedEntityNode->leftSon;
+        y->leftSon->father = y;
+        y->colour = deletedEntityNode->colour;
+    }
+    if (yOriginalColour == black)
+        deleteEntityFixUp(x);
+
+
+    // z è la cella che è stata liberata
     if (freeEntityElements >= freeEntityAllocated - 1){
           freeEntityAllocated += FREE_ENTITY_STOCK;
           freeEntityPosition = (entityNode**) realloc(freeEntityPosition, freeEntityAllocated * sizeof(entityNode*));
     }
-    freeEntityPosition[freeEntityElements] = y;
+    freeEntityPosition[freeEntityElements] = deletedEntityNode;
     freeEntityElements++;
 }
 
@@ -951,6 +988,7 @@ entityNode* treeMinimumEntity (entityNode* x){
 }
 
 // presa dalle slide del corso
+// todo sul libro c'è la versione iterativa
 void deleteEntityFixUp(entityNode* x){
     entityNode* w;
 
@@ -1007,4 +1045,21 @@ void deleteEntityFixUp(entityNode* x){
             rightRotateEntity(x->father);
         }
     }
+}
+
+// codice preso dal manuale del corso
+void entityTransplant (entityNode* u, entityNode* v){
+    if (u->father == &NIL_ENT)
+        entityRoot = v;
+    else if (u == u->father->leftSon)
+        u->father->leftSon = v;
+    else
+        u->father->rightSon = v;
+    v->father = u->father;
+}
+
+entityNode* entityMinimum (entityNode* x){
+    while (x->leftSon != &NIL_ENT)
+        x = x->leftSon;
+    return x;
 }
