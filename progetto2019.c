@@ -148,7 +148,7 @@ int main() {
     while (strcmp(inputBuffer, "end\n") != 0 ) {
 
         int a;
-        if (strcmp(inputBuffer, "addrel \"Airiam\" \"BEtor\" \"older_than\"\n") == 0)
+        if (strcmp(inputBuffer, "delent \"Boothby\"\n") == 0)
             a = 1;
 
         if (strcmp(inputBuffer, "report\n") == 0)
@@ -767,6 +767,9 @@ void delrel(char *originEntity, char *destinationEntity, char *relation) {
             break;
     }
 
+    // potrei dover aggiornare la posizione del ricevente eliminato se è stato spostato
+    if (k != i)
+        deletedReceiver = &deletedRelation->receivingList[k];
     // se il mittente rimane senza origini, lo elimino e diminuisco i numero di mittenti nella relazione.
     // devo liberare la memoria allocata per i mittenti e scalare tutti i riceventi successivi
     if (deletedReceiver->receivingTimes == 0){
